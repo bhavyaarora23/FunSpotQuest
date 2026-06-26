@@ -1,4 +1,4 @@
-const { MongoClient } = require('mongodb');
+content = '''const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
 
 const uri = process.env.MONGODB_URI;
@@ -92,3 +92,8 @@ async function nextId(db, field) {
 }
 
 module.exports = { getDb, nextId };
+'''
+
+with open('backend/db.js', 'w') as f:
+    f.write(content)
+print('Written successfully!')
