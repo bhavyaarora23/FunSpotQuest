@@ -703,26 +703,26 @@ a { text-decoration: none; color: inherit; }
     </div>
     <div class="modal-body">
       <div class="form-grid" style="margin-bottom:0">
-        <div class="form-group"><label class="form-label">Title</label><input class="form-input" placeholder="Story title..."></div>
+        <div class="form-group"><label class="form-label">Title</label><input id="story-title" class="form-input" placeholder="Story title..."></div>
         <div class="form-grid form-grid-2">
           <div class="form-group">
             <label class="form-label">Category</label>
-            <select class="form-select"><option>Adventure</option><option>Space</option><option>Animals</option><option>Mystery</option><option>Science</option><option>Moral</option></select>
+            <select id="story-category" class="form-select"><option>Adventure</option><option>Space</option><option>Animals</option><option>Mystery</option><option>Science</option><option>Moral</option></select>
           </div>
-          <div class="form-group"><label class="form-label">Cover Emoji</label><input class="form-input" placeholder="📖" value="📖"></div>
+          <div class="form-group"><label class="form-label">Cover Emoji</label><input id="story-emoji" class="form-input" placeholder="📖" value="📖"></div>
         </div>
         <div class="form-group"><label class="form-label">Cover Image URL (optional)</label><input class="form-input" placeholder="https://..."></div>
-        <div class="form-group"><label class="form-label">Content</label><textarea class="form-textarea" rows="5" placeholder="Write the story here..."></textarea></div>
+        <div class="form-group"><label class="form-label">Excerpt</label><textarea id="story-excerpt" class="form-textarea" rows="5" placeholder="Write a short excerpt..."></textarea></div>
         <div class="form-group"><label class="form-label">Audio URL (optional)</label><input class="form-input" placeholder="https://...mp3"></div>
         <div style="display:flex;gap:24px;margin-top:4px">
-          <div class="toggle-wrap"><div class="toggle" onclick="this.classList.toggle('on')"></div><span class="toggle-label">Premium only</span></div>
+          <div class="toggle-wrap"><div id="story-premium-toggle" class="toggle" onclick="this.classList.toggle('on')"></div><span class="toggle-label">Premium only</span></div>
           <div class="toggle-wrap"><div class="toggle" onclick="this.classList.toggle('on')"></div><span class="toggle-label">Set as Today's Story</span></div>
         </div>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('story-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="closeModal('story-modal');aToast('Story saved!','success')">Save Story</button>
+      <button class="btn btn-primary" onclick="saveStory()">Save Story</button>
     </div>
   </div>
 </div>
@@ -757,7 +757,7 @@ a { text-decoration: none; color: inherit; }
         <div class="form-group"><label class="form-label">External Embed URL (optional)</label><input class="form-input" placeholder="https://..."></div>
         <div class="form-group"><label class="form-label">Description</label><textarea class="form-textarea" rows="3" placeholder="Short description..."></textarea></div>
         <div style="display:flex;gap:24px">
-          <div class="toggle-wrap"><div class="toggle" onclick="this.classList.toggle('on')"></div><span class="toggle-label">Premium only</span></div>
+          <div class="toggle-wrap"><div id="story-premium-toggle" class="toggle" onclick="this.classList.toggle('on')"></div><span class="toggle-label">Premium only</span></div>
           <div class="toggle-wrap"><div class="toggle on" onclick="this.classList.toggle('on')"></div><span class="toggle-label">Visible (active)</span></div>
         </div>
       </div>
@@ -800,7 +800,7 @@ a { text-decoration: none; color: inherit; }
         </div>
         <div class="form-group"><label class="form-label">Or enter PDF URL</label><input class="form-input" placeholder="https://...pdf"></div>
         <div class="form-group"><label class="form-label">Description</label><textarea class="form-textarea" rows="3" placeholder="Short description..."></textarea></div>
-        <div class="toggle-wrap"><div class="toggle" onclick="this.classList.toggle('on')"></div><span class="toggle-label">Premium only</span></div>
+        <div class="toggle-wrap"><div id="story-premium-toggle" class="toggle" onclick="this.classList.toggle('on')"></div><span class="toggle-label">Premium only</span></div>
       </div>
     </div>
     <div class="modal-footer">
@@ -932,6 +932,41 @@ async function deleteStory(id){
   var res = await adminApiCall('/admin/stories/'+id, {method:'DELETE'});
   if(res.ok){ aToast('Story deleted','error'); STORIES_DATA = STORIES_DATA.filter(function(s){return s.id!==id}); renderStories(); }
   else aToast(res.error, 'error');
+}
+
+
+async function saveStory(){
+  var title = document.getElementById('story-title').value.trim();
+  var category = document.getElementById('story-category').value;
+  var emoji = document.getElementById('story-emoji').value.trim() || '📖';
+  var excerpt = document.getElementById('story-excerpt').value.trim();
+  var isPremium = document.getElementById('story-premium-toggle').classList.contains('on');
+
+  if(!title){ aToast('Please enter a title','error'); return; }
+  if(!excerpt){ aToast('Please enter an excerpt','error'); return; }
+
+  var res = await adminApiCall('/admin/stories', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: title,
+      category: category,
+      emoji: emoji,
+      excerpt: excerpt,
+      type: isPremium ? 'premium' : 'free'
+    })
+  });
+
+  if(res.ok){
+    STORIES_DATA.push(res.story);
+    renderStories();
+    closeModal('story-modal');
+    aToast('Story added successfully!', 'success');
+    document.getElementById('story-title').value = '';
+    document.getElementById('story-excerpt').value = '';
+    document.getElementById('story-premium-toggle').classList.remove('on');
+  } else {
+    aToast(res.error || 'Failed to save story', 'error');
+  }
 }
 
 async function setTodayStory(id){
