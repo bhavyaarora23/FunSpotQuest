@@ -1,12 +1,11 @@
 if (process.env.NODE_ENV !== 'production') require('dotenv').config();
 
-
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 
-const { readDb, writeDb } = require('./db');
+const { getDb, nextId } = require('./db');
 const { signToken, requireAuth, requireAdmin } = require('./auth');
 
 const app = express();
@@ -23,383 +22,392 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// ───────────────────────────────────────────────
-// Serve the frontend (the actual website + admin panel)
-// ───────────────────────────────────────────────
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 app.use(express.static(FRONTEND_DIR));
 
-// ═════════════════════════════════════════════════
-// AUTH
-// ═════════════════════════════════════════════════
+// ── AUTH ──────────────────────────────────────────
 
-app.post('/api/auth/signup', (req, res) => {
-  const { name, email, password, role } = req.body || {};
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Name, email and password are all required.' });
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body || {};
+    if (!name || !email || !password)
+      return res.status(400).json({ error: 'Name, email and password are all required.' });
+    if (password.length < 6)
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+    const db = await getDb();
+    const existing = await db.collection('users').findOne({ email: email.toLowerCase() });
+    if (existing)
+      return res.status(409).json({ error: 'An account with that email already exists.' });
+
+    const id = await nextId(db, 'users');
+    const newUser = {
+      id, name, email: email.toLowerCase(),
+      password: bcrypt.hashSync(password, 10),
+      role: role === 'teacher' ? 'teacher' : (role === 'child' ? 'child' : 'parent'),
+      coins: 0, status: 'active', created_at: new Date().toISOString()
+    };
+    await db.collection('users').insertOne(newUser);
+
+    const token = signToken(newUser);
+    const { password: _pw, _id, ...safeUser } = newUser;
+    res.json({ token, user: safeUser });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error.' });
   }
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-  }
-
-  const db = readDb();
-  const existing = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-  if (existing) {
-    return res.status(409).json({ error: 'An account with that email already exists.' });
-  }
-
-  const newUser = {
-    id: db.nextIds.users++,
-    name,
-    email,
-    password: bcrypt.hashSync(password, 10),
-    role: role === 'teacher' ? 'teacher' : (role === 'child' ? 'child' : 'parent'),
-    coins: 0,
-    status: 'active',
-    created_at: new Date().toISOString()
-  };
-  db.users.push(newUser);
-  writeDb(db);
-
-  const token = signToken(newUser);
-  const { password: _pw, ...safeUser } = newUser;
-  res.json({ token, user: safeUser });
 });
 
-app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required.' });
-  }
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password)
+      return res.status(400).json({ error: 'Email and password are required.' });
 
-  const db = readDb();
-  const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-  if (!user || !bcrypt.compareSync(password, user.password)) {
-    return res.status(401).json({ error: 'Incorrect email or password.' });
-  }
-  if (user.status === 'suspended') {
-    return res.status(403).json({ error: 'This account has been suspended.' });
-  }
+    const db = await getDb();
+    const user = await db.collection('users').findOne({ email: email.toLowerCase() });
+    if (!user || !bcrypt.compareSync(password, user.password))
+      return res.status(401).json({ error: 'Incorrect email or password.' });
+    if (user.status === 'suspended')
+      return res.status(403).json({ error: 'This account has been suspended.' });
 
-  const token = signToken(user);
-  const { password: _pw, ...safeUser } = user;
-  res.json({ token, user: safeUser });
+    const token = signToken(user);
+    const { password: _pw, _id, ...safeUser } = user;
+    res.json({ token, user: safeUser });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
 });
 
 app.post('/api/auth/forgot-password', (req, res) => {
-  const { email } = req.body || {};
-  if (!email) {
-    return res.status(400).json({ error: 'Please provide an email address.' });
-  }
-  // No real email service is wired up yet — this simply acknowledges the request
-  // so the frontend's "reset link sent" flow works. Hook up a real email
-  // provider here (e.g. SendGrid, Postmark) when you're ready to go live.
   res.json({ message: 'If an account exists for that email, a reset link has been sent.' });
 });
 
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  const db = readDb();
-  const user = db.users.find(u => u.id === req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-  const { password: _pw, ...safeUser } = user;
-  res.json({ user: safeUser });
-});
-
-// ═════════════════════════════════════════════════
-// PUBLIC CONTENT
-// ═════════════════════════════════════════════════
-
-app.get('/api/stories', (req, res) => {
-  const db = readDb();
-  res.json({ stories: db.stories });
-});
-
-app.get('/api/games', (req, res) => {
-  const db = readDb();
-  res.json({ games: db.games });
-});
-
-app.get('/api/worksheets', (req, res) => {
-  const db = readDb();
-  res.json({ worksheets: db.worksheets });
-});
-
-app.get('/api/settings/public', (req, res) => {
-  const db = readDb();
-  const { coins_per_story, coins_per_worksheet, coins_per_game, premium_monthly_price, family_monthly_price } = db.settings;
-  res.json({ settings: { coins_per_story, coins_per_worksheet, coins_per_game, premium_monthly_price, family_monthly_price } });
-});
-
-// ═════════════════════════════════════════════════
-// PLAY / READ / DOWNLOAD (earn coins, logged-in users only)
-// ═════════════════════════════════════════════════
-
-app.post('/api/games/:id/play', requireAuth, (req, res) => {
-  const db = readDb();
-  const game = db.games.find(g => g.id === Number(req.params.id));
-  if (!game) return res.status(404).json({ error: 'Game not found.' });
-
-  const user = db.users.find(u => u.id === req.user.id);
-  const coinsEarned = db.settings.coins_per_game;
-  user.coins += coinsEarned;
-
-  db.progress.push({
-    id: db.nextIds.progress++,
-    user_id: user.id,
-    type: 'game',
-    item_id: game.id,
-    coins_earned: coinsEarned,
-    created_at: new Date().toISOString()
-  });
-  writeDb(db);
-
-  res.json({ message: `You earned ${coinsEarned} coins! 🪙`, coins_earned: coinsEarned, total_coins: user.coins });
-});
-
-app.post('/api/stories/:id/read', requireAuth, (req, res) => {
-  const db = readDb();
-  const story = db.stories.find(s => s.id === Number(req.params.id));
-  if (!story) return res.status(404).json({ error: 'Story not found.' });
-
-  story.reads = (story.reads || 0) + 1;
-
-  const user = db.users.find(u => u.id === req.user.id);
-  const coinsEarned = db.settings.coins_per_story;
-  user.coins += coinsEarned;
-
-  db.progress.push({
-    id: db.nextIds.progress++,
-    user_id: user.id,
-    type: 'story',
-    item_id: story.id,
-    coins_earned: coinsEarned,
-    created_at: new Date().toISOString()
-  });
-  writeDb(db);
-
-  res.json({ message: `Story complete! You earned ${coinsEarned} coins! 🪙`, coins_earned: coinsEarned, total_coins: user.coins });
-});
-
-app.post('/api/worksheets/:id/download', requireAuth, (req, res) => {
-  const db = readDb();
-  const worksheet = db.worksheets.find(w => w.id === Number(req.params.id));
-  if (!worksheet) return res.status(404).json({ error: 'Worksheet not found.' });
-
-  worksheet.downloads = (worksheet.downloads || 0) + 1;
-
-  const user = db.users.find(u => u.id === req.user.id);
-  const coinsEarned = db.settings.coins_per_worksheet;
-  user.coins += coinsEarned;
-
-  db.progress.push({
-    id: db.nextIds.progress++,
-    user_id: user.id,
-    type: 'worksheet',
-    item_id: worksheet.id,
-    coins_earned: coinsEarned,
-    created_at: new Date().toISOString()
-  });
-  writeDb(db);
-
-  res.json({ message: `You earned ${coinsEarned} coins! 🪙`, coins_earned: coinsEarned, total_coins: user.coins });
-});
-
-app.get('/api/progress/me', requireAuth, (req, res) => {
-  const db = readDb();
-  const myProgress = db.progress.filter(p => p.user_id === req.user.id);
-  const user = db.users.find(u => u.id === req.user.id);
-  res.json({ progress: myProgress, total_coins: user ? user.coins : 0 });
-});
-
-// ═════════════════════════════════════════════════
-// SUBSCRIPTION (records a plan choice — no real payment gateway wired up yet)
-// ═════════════════════════════════════════════════
-
-app.post('/api/subscribe', requireAuth, (req, res) => {
-  const { plan } = req.body || {};
-  if (!plan) return res.status(400).json({ error: 'Please choose a plan.' });
-
-  const db = readDb();
-  const user = db.users.find(u => u.id === req.user.id);
-  user.plan = plan;
-  writeDb(db);
-
-  // NOTE for future you: to accept real payments, integrate Stripe or Razorpay
-  // here before marking the subscription active.
-  res.json({ message: `You're now on the ${plan} plan!`, plan });
-});
-
-// ═════════════════════════════════════════════════
-// ADMIN
-// ═════════════════════════════════════════════════
-
-app.get('/api/admin/stats', requireAdmin, (req, res) => {
-  const db = readDb();
-  res.json({
-    stats: {
-      total_users: db.users.length,
-      total_stories: db.stories.length,
-      total_games: db.games.length,
-      total_worksheets: db.worksheets.length,
-      total_story_reads: db.stories.reduce((sum, s) => sum + (s.reads || 0), 0),
-      total_worksheet_downloads: db.worksheets.reduce((sum, w) => sum + (w.downloads || 0), 0),
-      total_coins_awarded: db.progress.reduce((sum, p) => sum + (p.coins_earned || 0), 0)
-    }
-  });
-});
-
-// --- Stories CRUD ---
-app.post('/api/admin/stories', requireAdmin, (req, res) => {
-  const db = readDb();
-  const story = { id: db.nextIds.stories++, reads: 0, is_today: false, ...req.body };
-  db.stories.push(story);
-  writeDb(db);
-  res.json({ story });
-});
-
-app.put('/api/admin/stories/:id', requireAdmin, (req, res) => {
-  const db = readDb();
-  const story = db.stories.find(s => s.id === Number(req.params.id));
-  if (!story) return res.status(404).json({ error: 'Story not found.' });
-  Object.assign(story, req.body);
-  writeDb(db);
-  res.json({ story });
-});
-
-app.delete('/api/admin/stories/:id', requireAdmin, (req, res) => {
-  const db = readDb();
-  db.stories = db.stories.filter(s => s.id !== Number(req.params.id));
-  writeDb(db);
-  res.json({ message: 'Story deleted.' });
-});
-
-app.post('/api/admin/stories/:id/set-today', requireAdmin, (req, res) => {
-  const db = readDb();
-  db.stories.forEach(s => { s.is_today = false; });
-  const story = db.stories.find(s => s.id === Number(req.params.id));
-  if (!story) return res.status(404).json({ error: 'Story not found.' });
-  story.is_today = true;
-  db.settings.daily_story_id = story.id;
-  writeDb(db);
-  res.json({ story });
-});
-
-// --- Games CRUD ---
-app.post('/api/admin/games', requireAdmin, (req, res) => {
-  const db = readDb();
-  const game = { id: db.nextIds.games++, ...req.body };
-  db.games.push(game);
-  writeDb(db);
-  res.json({ game });
-});
-
-app.put('/api/admin/games/:id', requireAdmin, (req, res) => {
-  const db = readDb();
-  const game = db.games.find(g => g.id === Number(req.params.id));
-  if (!game) return res.status(404).json({ error: 'Game not found.' });
-  Object.assign(game, req.body);
-  writeDb(db);
-  res.json({ game });
-});
-
-app.delete('/api/admin/games/:id', requireAdmin, (req, res) => {
-  const db = readDb();
-  db.games = db.games.filter(g => g.id !== Number(req.params.id));
-  writeDb(db);
-  res.json({ message: 'Game deleted.' });
-});
-
-// --- Worksheets CRUD ---
-app.post('/api/admin/worksheets', requireAdmin, (req, res) => {
-  const db = readDb();
-  const worksheet = { id: db.nextIds.worksheets++, downloads: 0, ...req.body };
-  db.worksheets.push(worksheet);
-  writeDb(db);
-  res.json({ worksheet });
-});
-
-app.put('/api/admin/worksheets/:id', requireAdmin, (req, res) => {
-  const db = readDb();
-  const worksheet = db.worksheets.find(w => w.id === Number(req.params.id));
-  if (!worksheet) return res.status(404).json({ error: 'Worksheet not found.' });
-  Object.assign(worksheet, req.body);
-  writeDb(db);
-  res.json({ worksheet });
-});
-
-app.delete('/api/admin/worksheets/:id', requireAdmin, (req, res) => {
-  const db = readDb();
-  db.worksheets = db.worksheets.filter(w => w.id !== Number(req.params.id));
-  writeDb(db);
-  res.json({ message: 'Worksheet deleted.' });
-});
-
-// --- Users management ---
-app.get('/api/admin/users', requireAdmin, (req, res) => {
-  const db = readDb();
-  const safeUsers = db.users.map(({ password, ...rest }) => rest);
-  res.json({ users: safeUsers });
-});
-
-app.put('/api/admin/users/:id/status', requireAdmin, (req, res) => {
-  const { status } = req.body || {};
-  if (!['active', 'suspended'].includes(status)) {
-    return res.status(400).json({ error: "Status must be 'active' or 'suspended'." });
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const user = await db.collection('users').findOne({ id: req.user.id });
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    const { password: _pw, _id, ...safeUser } = user;
+    res.json({ user: safeUser });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
   }
-  const db = readDb();
-  const user = db.users.find(u => u.id === Number(req.params.id));
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-  user.status = status;
-  writeDb(db);
-  const { password: _pw, ...safeUser } = user;
-  res.json({ user: safeUser });
 });
 
-app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
-  const db = readDb();
-  db.users = db.users.filter(u => u.id !== Number(req.params.id));
-  writeDb(db);
-  res.json({ message: 'User deleted.' });
+// ── PUBLIC CONTENT ────────────────────────────────
+
+app.get('/api/stories', async (req, res) => {
+  try {
+    const db = await getDb();
+    const stories = await db.collection('stories').find({}, { projection: { _id: 0 } }).toArray();
+    res.json({ stories });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
 });
 
-// --- Settings ---
-app.get('/api/admin/settings', requireAdmin, (req, res) => {
-  const db = readDb();
-  res.json({ settings: db.settings });
+app.get('/api/games', async (req, res) => {
+  try {
+    const db = await getDb();
+    const games = await db.collection('games').find({}, { projection: { _id: 0 } }).toArray();
+    res.json({ games });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
 });
 
-app.put('/api/admin/settings', requireAdmin, (req, res) => {
-  const db = readDb();
-  Object.assign(db.settings, req.body);
-  writeDb(db);
-  res.json({ settings: db.settings });
+app.get('/api/worksheets', async (req, res) => {
+  try {
+    const db = await getDb();
+    const worksheets = await db.collection('worksheets').find({}, { projection: { _id: 0 } }).toArray();
+    res.json({ worksheets });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
 });
 
-// ═════════════════════════════════════════════════
-// FALLBACK — serve the right HTML page for any non-API route
-// ═════════════════════════════════════════════════
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(FRONTEND_DIR, 'admin.html'));
-});
-app.get('/admin.html', (req, res) => {
-  res.sendFile(path.join(FRONTEND_DIR, 'admin.html'));
+app.get('/api/settings/public', async (req, res) => {
+  try {
+    const db = await getDb();
+    const s = await db.collection('settings').findOne({ _id: 'main' });
+    const { coins_per_story, coins_per_worksheet, coins_per_game, premium_monthly_price, family_monthly_price } = s;
+    res.json({ settings: { coins_per_story, coins_per_worksheet, coins_per_game, premium_monthly_price, family_monthly_price } });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
 });
 
+// ── EARN COINS ────────────────────────────────────
+
+app.post('/api/games/:id/play', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const game = await db.collection('games').findOne({ id: Number(req.params.id) });
+    if (!game) return res.status(404).json({ error: 'Game not found.' });
+
+    const s = await db.collection('settings').findOne({ _id: 'main' });
+    const coinsEarned = s.coins_per_game;
+
+    await db.collection('users').updateOne({ id: req.user.id }, { $inc: { coins: coinsEarned } });
+    const pid = await nextId(db, 'progress');
+    await db.collection('progress').insertOne({
+      id: pid, user_id: req.user.id, type: 'game',
+      item_id: game.id, coins_earned: coinsEarned, created_at: new Date().toISOString()
+    });
+    const user = await db.collection('users').findOne({ id: req.user.id });
+    res.json({ message: `You earned ${coinsEarned} coins!`, coins_earned: coinsEarned, total_coins: user.coins });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+
+app.post('/api/stories/:id/read', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const story = await db.collection('stories').findOne({ id: Number(req.params.id) });
+    if (!story) return res.status(404).json({ error: 'Story not found.' });
+
+    await db.collection('stories').updateOne({ id: story.id }, { $inc: { reads: 1 } });
+    const s = await db.collection('settings').findOne({ _id: 'main' });
+    const coinsEarned = s.coins_per_story;
+
+    await db.collection('users').updateOne({ id: req.user.id }, { $inc: { coins: coinsEarned } });
+    const pid = await nextId(db, 'progress');
+    await db.collection('progress').insertOne({
+      id: pid, user_id: req.user.id, type: 'story',
+      item_id: story.id, coins_earned: coinsEarned, created_at: new Date().toISOString()
+    });
+    const user = await db.collection('users').findOne({ id: req.user.id });
+    res.json({ message: `Story complete! You earned ${coinsEarned} coins!`, coins_earned: coinsEarned, total_coins: user.coins });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+
+app.post('/api/worksheets/:id/download', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const worksheet = await db.collection('worksheets').findOne({ id: Number(req.params.id) });
+    if (!worksheet) return res.status(404).json({ error: 'Worksheet not found.' });
+
+    await db.collection('worksheets').updateOne({ id: worksheet.id }, { $inc: { downloads: 1 } });
+    const s = await db.collection('settings').findOne({ _id: 'main' });
+    const coinsEarned = s.coins_per_worksheet;
+
+    await db.collection('users').updateOne({ id: req.user.id }, { $inc: { coins: coinsEarned } });
+    const pid = await nextId(db, 'progress');
+    await db.collection('progress').insertOne({
+      id: pid, user_id: req.user.id, type: 'worksheet',
+      item_id: worksheet.id, coins_earned: coinsEarned, created_at: new Date().toISOString()
+    });
+    const user = await db.collection('users').findOne({ id: req.user.id });
+    res.json({ message: `You earned ${coinsEarned} coins!`, coins_earned: coinsEarned, total_coins: user.coins });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+
+app.get('/api/progress/me', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const progress = await db.collection('progress').find({ user_id: req.user.id }, { projection: { _id: 0 } }).toArray();
+    const user = await db.collection('users').findOne({ id: req.user.id });
+    res.json({ progress, total_coins: user ? user.coins : 0 });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+
+app.post('/api/subscribe', requireAuth, async (req, res) => {
+  try {
+    const { plan } = req.body || {};
+    if (!plan) return res.status(400).json({ error: 'Please choose a plan.' });
+    const db = await getDb();
+    await db.collection('users').updateOne({ id: req.user.id }, { $set: { plan } });
+    res.json({ message: `You're now on the ${plan} plan!`, plan });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+
+// ── ADMIN ─────────────────────────────────────────
+
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const [users, stories, games, worksheets, progress] = await Promise.all([
+      db.collection('users').countDocuments(),
+      db.collection('stories').countDocuments(),
+      db.collection('games').countDocuments(),
+      db.collection('worksheets').countDocuments(),
+      db.collection('progress').find().toArray()
+    ]);
+    const storiesArr = await db.collection('stories').find().toArray();
+    const worksheetsArr = await db.collection('worksheets').find().toArray();
+    res.json({ stats: {
+      total_users: users, total_stories: stories,
+      total_games: games, total_worksheets: worksheets,
+      total_story_reads: storiesArr.reduce((s, x) => s + (x.reads || 0), 0),
+      total_worksheet_downloads: worksheetsArr.reduce((s, x) => s + (x.downloads || 0), 0),
+      total_coins_awarded: progress.reduce((s, x) => s + (x.coins_earned || 0), 0)
+    }});
+  } catch (err) {
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+
+app.post('/api/admin/stories', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const id = await nextId(db, 'stories');
+    const story = { id, reads: 0, is_today: false, ...req.body };
+    await db.collection('stories').insertOne(story);
+    const { _id, ...clean } = story;
+    res.json({ story: clean });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.put('/api/admin/stories/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('stories').updateOne({ id: Number(req.params.id) }, { $set: req.body });
+    const story = await db.collection('stories').findOne({ id: Number(req.params.id) }, { projection: { _id: 0 } });
+    res.json({ story });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.delete('/api/admin/stories/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('stories').deleteOne({ id: Number(req.params.id) });
+    res.json({ message: 'Story deleted.' });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.post('/api/admin/stories/:id/set-today', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('stories').updateMany({}, { $set: { is_today: false } });
+    await db.collection('stories').updateOne({ id: Number(req.params.id) }, { $set: { is_today: true } });
+    await db.collection('settings').updateOne({ _id: 'main' }, { $set: { daily_story_id: Number(req.params.id) } });
+    const story = await db.collection('stories').findOne({ id: Number(req.params.id) }, { projection: { _id: 0 } });
+    res.json({ story });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.post('/api/admin/games', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const id = await nextId(db, 'games');
+    const game = { id, ...req.body };
+    await db.collection('games').insertOne(game);
+    const { _id, ...clean } = game;
+    res.json({ game: clean });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.put('/api/admin/games/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('games').updateOne({ id: Number(req.params.id) }, { $set: req.body });
+    const game = await db.collection('games').findOne({ id: Number(req.params.id) }, { projection: { _id: 0 } });
+    res.json({ game });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.delete('/api/admin/games/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('games').deleteOne({ id: Number(req.params.id) });
+    res.json({ message: 'Game deleted.' });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.post('/api/admin/worksheets', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const id = await nextId(db, 'worksheets');
+    const worksheet = { id, downloads: 0, ...req.body };
+    await db.collection('worksheets').insertOne(worksheet);
+    const { _id, ...clean } = worksheet;
+    res.json({ worksheet: clean });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.put('/api/admin/worksheets/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('worksheets').updateOne({ id: Number(req.params.id) }, { $set: req.body });
+    const worksheet = await db.collection('worksheets').findOne({ id: Number(req.params.id) }, { projection: { _id: 0 } });
+    res.json({ worksheet });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.delete('/api/admin/worksheets/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('worksheets').deleteOne({ id: Number(req.params.id) });
+    res.json({ message: 'Worksheet deleted.' });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const users = await db.collection('users').find({}, { projection: { _id: 0, password: 0 } }).toArray();
+    res.json({ users });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.put('/api/admin/users/:id/status', requireAdmin, async (req, res) => {
+  try {
+    const { status } = req.body || {};
+    if (!['active', 'suspended'].includes(status))
+      return res.status(400).json({ error: "Status must be 'active' or 'suspended'." });
+    const db = await getDb();
+    await db.collection('users').updateOne({ id: Number(req.params.id) }, { $set: { status } });
+    const user = await db.collection('users').findOne({ id: Number(req.params.id) }, { projection: { _id: 0, password: 0 } });
+    res.json({ user });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('users').deleteOne({ id: Number(req.params.id) });
+    res.json({ message: 'User deleted.' });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.get('/api/admin/settings', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const settings = await db.collection('settings').findOne({ _id: 'main' });
+    const { _id, ...clean } = settings;
+    res.json({ settings: clean });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+app.put('/api/admin/settings', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('settings').updateOne({ _id: 'main' }, { $set: req.body });
+    const settings = await db.collection('settings').findOne({ _id: 'main' });
+    const { _id, ...clean } = settings;
+    res.json({ settings: clean });
+  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+});
+
+// ── FALLBACK ──────────────────────────────────────
+
+app.get('/admin', (req, res) => res.sendFile(path.join(FRONTEND_DIR, 'admin.html')));
+app.get('/admin.html', (req, res) => res.sendFile(path.join(FRONTEND_DIR, 'admin.html')));
 app.get('*', (req, res) => {
-  if (req.path.startsWith('/api/')) {
-    return res.status(404).json({ error: 'Not found.' });
-  }
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found.' });
   res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log('');
-  console.log('  🎉 FunSpot Quest server is running!');
-  console.log('  ────────────────────────────────────');
-  console.log(`  Website:     http://localhost:${PORT}`);
-  console.log(`  Admin panel: http://localhost:${PORT}/admin`);
-  console.log('');
-  console.log('  Admin login: admin@funspotquest.com / admin123');
-  console.log('  (Please change this password once you\'re live!)');
-  console.log('');
+  console.log(`\n  FunSpot Quest server running on port ${PORT}\n`);
 });
