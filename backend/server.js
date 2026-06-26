@@ -54,7 +54,7 @@ app.post('/api/auth/signup', async (req, res) => {
     res.json({ token, user: safeUser });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -75,7 +75,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { password: _pw, _id, ...safeUser } = user;
     res.json({ token, user: safeUser });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -91,7 +91,7 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
     const { password: _pw, _id, ...safeUser } = user;
     res.json({ user: safeUser });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -103,7 +103,7 @@ app.get('/api/stories', async (req, res) => {
     const stories = await db.collection('stories').find({}, { projection: { _id: 0 } }).toArray();
     res.json({ stories });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -113,7 +113,7 @@ app.get('/api/games', async (req, res) => {
     const games = await db.collection('games').find({}, { projection: { _id: 0 } }).toArray();
     res.json({ games });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -123,7 +123,7 @@ app.get('/api/worksheets', async (req, res) => {
     const worksheets = await db.collection('worksheets').find({}, { projection: { _id: 0 } }).toArray();
     res.json({ worksheets });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -134,7 +134,7 @@ app.get('/api/settings/public', async (req, res) => {
     const { coins_per_story, coins_per_worksheet, coins_per_game, premium_monthly_price, family_monthly_price } = s;
     res.json({ settings: { coins_per_story, coins_per_worksheet, coins_per_game, premium_monthly_price, family_monthly_price } });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -158,7 +158,7 @@ app.post('/api/games/:id/play', requireAuth, async (req, res) => {
     const user = await db.collection('users').findOne({ id: req.user.id });
     res.json({ message: `You earned ${coinsEarned} coins!`, coins_earned: coinsEarned, total_coins: user.coins });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -181,7 +181,7 @@ app.post('/api/stories/:id/read', requireAuth, async (req, res) => {
     const user = await db.collection('users').findOne({ id: req.user.id });
     res.json({ message: `Story complete! You earned ${coinsEarned} coins!`, coins_earned: coinsEarned, total_coins: user.coins });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -204,7 +204,7 @@ app.post('/api/worksheets/:id/download', requireAuth, async (req, res) => {
     const user = await db.collection('users').findOne({ id: req.user.id });
     res.json({ message: `You earned ${coinsEarned} coins!`, coins_earned: coinsEarned, total_coins: user.coins });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -215,7 +215,7 @@ app.get('/api/progress/me', requireAuth, async (req, res) => {
     const user = await db.collection('users').findOne({ id: req.user.id });
     res.json({ progress, total_coins: user ? user.coins : 0 });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -227,7 +227,7 @@ app.post('/api/subscribe', requireAuth, async (req, res) => {
     await db.collection('users').updateOne({ id: req.user.id }, { $set: { plan } });
     res.json({ message: `You're now on the ${plan} plan!`, plan });
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -253,7 +253,7 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
       total_coins_awarded: progress.reduce((s, x) => s + (x.coins_earned || 0), 0)
     }});
   } catch (err) {
-    res.status(500).json({ error: 'Server error.' });
+    console.error('API ERROR:', err.message); res.status(500).json({ error: err.message });
   }
 });
 
@@ -265,7 +265,7 @@ app.post('/api/admin/stories', requireAdmin, async (req, res) => {
     await db.collection('stories').insertOne(story);
     const { _id, ...clean } = story;
     res.json({ story: clean });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/admin/stories/:id', requireAdmin, async (req, res) => {
@@ -274,7 +274,7 @@ app.put('/api/admin/stories/:id', requireAdmin, async (req, res) => {
     await db.collection('stories').updateOne({ id: Number(req.params.id) }, { $set: req.body });
     const story = await db.collection('stories').findOne({ id: Number(req.params.id) }, { projection: { _id: 0 } });
     res.json({ story });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/admin/stories/:id', requireAdmin, async (req, res) => {
@@ -282,7 +282,7 @@ app.delete('/api/admin/stories/:id', requireAdmin, async (req, res) => {
     const db = await getDb();
     await db.collection('stories').deleteOne({ id: Number(req.params.id) });
     res.json({ message: 'Story deleted.' });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/admin/stories/:id/set-today', requireAdmin, async (req, res) => {
@@ -293,7 +293,7 @@ app.post('/api/admin/stories/:id/set-today', requireAdmin, async (req, res) => {
     await db.collection('settings').updateOne({ _id: 'main' }, { $set: { daily_story_id: Number(req.params.id) } });
     const story = await db.collection('stories').findOne({ id: Number(req.params.id) }, { projection: { _id: 0 } });
     res.json({ story });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/admin/games', requireAdmin, async (req, res) => {
@@ -304,7 +304,7 @@ app.post('/api/admin/games', requireAdmin, async (req, res) => {
     await db.collection('games').insertOne(game);
     const { _id, ...clean } = game;
     res.json({ game: clean });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/admin/games/:id', requireAdmin, async (req, res) => {
@@ -313,7 +313,7 @@ app.put('/api/admin/games/:id', requireAdmin, async (req, res) => {
     await db.collection('games').updateOne({ id: Number(req.params.id) }, { $set: req.body });
     const game = await db.collection('games').findOne({ id: Number(req.params.id) }, { projection: { _id: 0 } });
     res.json({ game });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/admin/games/:id', requireAdmin, async (req, res) => {
@@ -321,7 +321,7 @@ app.delete('/api/admin/games/:id', requireAdmin, async (req, res) => {
     const db = await getDb();
     await db.collection('games').deleteOne({ id: Number(req.params.id) });
     res.json({ message: 'Game deleted.' });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/admin/worksheets', requireAdmin, async (req, res) => {
@@ -332,7 +332,7 @@ app.post('/api/admin/worksheets', requireAdmin, async (req, res) => {
     await db.collection('worksheets').insertOne(worksheet);
     const { _id, ...clean } = worksheet;
     res.json({ worksheet: clean });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/admin/worksheets/:id', requireAdmin, async (req, res) => {
@@ -341,7 +341,7 @@ app.put('/api/admin/worksheets/:id', requireAdmin, async (req, res) => {
     await db.collection('worksheets').updateOne({ id: Number(req.params.id) }, { $set: req.body });
     const worksheet = await db.collection('worksheets').findOne({ id: Number(req.params.id) }, { projection: { _id: 0 } });
     res.json({ worksheet });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/admin/worksheets/:id', requireAdmin, async (req, res) => {
@@ -349,7 +349,7 @@ app.delete('/api/admin/worksheets/:id', requireAdmin, async (req, res) => {
     const db = await getDb();
     await db.collection('worksheets').deleteOne({ id: Number(req.params.id) });
     res.json({ message: 'Worksheet deleted.' });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
@@ -357,7 +357,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     const db = await getDb();
     const users = await db.collection('users').find({}, { projection: { _id: 0, password: 0 } }).toArray();
     res.json({ users });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/admin/users/:id/status', requireAdmin, async (req, res) => {
@@ -369,7 +369,7 @@ app.put('/api/admin/users/:id/status', requireAdmin, async (req, res) => {
     await db.collection('users').updateOne({ id: Number(req.params.id) }, { $set: { status } });
     const user = await db.collection('users').findOne({ id: Number(req.params.id) }, { projection: { _id: 0, password: 0 } });
     res.json({ user });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
@@ -377,7 +377,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     const db = await getDb();
     await db.collection('users').deleteOne({ id: Number(req.params.id) });
     res.json({ message: 'User deleted.' });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/admin/settings', requireAdmin, async (req, res) => {
@@ -386,7 +386,7 @@ app.get('/api/admin/settings', requireAdmin, async (req, res) => {
     const settings = await db.collection('settings').findOne({ _id: 'main' });
     const { _id, ...clean } = settings;
     res.json({ settings: clean });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/admin/settings', requireAdmin, async (req, res) => {
@@ -396,7 +396,7 @@ app.put('/api/admin/settings', requireAdmin, async (req, res) => {
     const settings = await db.collection('settings').findOne({ _id: 'main' });
     const { _id, ...clean } = settings;
     res.json({ settings: clean });
-  } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+  } catch (err) { console.error('API ERROR:', err.message); res.status(500).json({ error: err.message }); }
 });
 
 // ── FALLBACK ──────────────────────────────────────
