@@ -6,9 +6,11 @@ let client;
 let _db;
 
 async function getDb() {
+  console.log("Connecting to MongoDB...", process.env.MONGODB_URI ? "URI exists" : "URI MISSING");
   if (_db) return _db;
   client = new MongoClient(uri);
   await client.connect();
+  console.log("MongoDB connected successfully!");
   _db = client.db('funspotquest');
   await seedIfEmpty(_db);
   return _db;
